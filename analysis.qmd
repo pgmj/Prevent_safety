@@ -1,0 +1,2472 @@
+---
+title: "Prevent Säkerhetsvisaren 2.0"
+subtitle: "Psykometrisk analys med Rasch-metodik"
+title-block-banner: "#009ca6"
+title-block-banner-color: "#FFFFFF"
+author: 
+  name: Magnus Johansson
+  affiliation: RISE Research Institutes of Sweden
+  affiliation-url: https://www.ri.se/shic
+  orcid: 0000-0003-1669-592X
+date: last-modified
+date-format: iso
+format: 
+  html:
+    toc: true
+    toc-depth: 4
+    toc-title: "Table of contents"
+    embed-resources: true
+    standalone: true
+    page-layout: full
+    mainfont: 'Lato'
+    monofont: 'Roboto Mono'
+    code-overflow: wrap
+    code-fold: true
+    code-tools: true
+    number-sections: true
+    fig-dpi: 96
+    layout-align: left
+    linestretch: 1.6
+    theme:
+      - materia
+      - custom.scss
+    css: styles.css
+    license: CC BY
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: true
+editor_options: 
+  markdown: 
+    wrap: 72
+  chunk_output_type: console
+bibliography: 
+ - references.bib
+ - grateful-refs.bib
+---
+
+```{r}
+#| label: setup
+
+# one package below requires that you use devtools to install them manually:
+# first install devtools by
+# install.packages('devtools')
+
+library(RISEkbmRasch) # devtools::install_github("pgmj/RISEkbmRasch")
+library(grateful)
+library(ggrepel)
+library(car)
+library(kableExtra)
+library(readxl)
+library(tidyverse)
+library(eRm)
+library(mirt)
+library(psych)
+library(psychotree)
+library(matrixStats)
+library(reshape)
+library(knitr)
+library(patchwork)
+library(formattable) 
+library(glue)
+library(haven)
+library(labelled)
+library(qualtRics)
+library(janitor)
+library(lavaanExtra)
+library(lavaan)
+library(lavaanPlot)
+library(parameters)
+library(marginaleffects)
+library(modelsummary)
+library(showtext)
+library(broom)
+source("theme_prevent.R")
+
+### optional libraries
+#library(TAM)
+#library(skimr)
+
+### some commands exist in multiple packages, here we define preferred ones that are frequently used
+select <- dplyr::select
+count <- dplyr::count
+recode <- car::recode
+rename <- dplyr::rename
+annotate <- ggplot2::annotate
+
+source("RISE_theme.R")
+```
+
+```{r}
+# import item information
+df <- read_spss("data/prevent_safety_itemlabels.sav")
+
+# get metadata into a separate dataframe
+item <- lapply(df, function(x) attributes(x)$label)
+
+itemlabels_all <- data.frame(
+  itemnr = names(df),
+  item = unlist(item),
+  row.names = NULL
+)
+
+itemlabels <- itemlabels_all %>% 
+  filter(str_detect(itemnr, 'q1|q2|q3|q4')) %>% 
+  separate_wider_delim(item, names =  c(NA,"item"), delim = ". - ")
+```
+
+```{r}
+# import data
+# qualtrics_token <- read.table("../.qualtrics_token", header = FALSE) %>% 
+#   pull(V1)
+# qualtrics_url <- "fra1.qualtrics.com"
+# 
+# qualtrics_api_credentials(api_key = qualtrics_token, 
+#  base_url = qualtrics_url)
+# 
+# q <- all_surveys()
+# mysurvey <- fetch_survey(surveyID = q$id[1],
+#                          verbose = FALSE) %>% 
+#   clean_names() %>% 
+#   filter(start_date > '2024-03-26') # enkätstart 27e mars 2024, så filtrera bort äldre svar.
+# 
+# df <- mysurvey %>% 
+#   filter(start_date > '2024-03-26') %>% 
+#   select(starts_with("q"),age,gender,role,bransch,duration_in_seconds) %>% 
+#   rownames_to_column("id")
+# 
+demogr_vars <- as.character(expression(age,gender,role,bransch))
+# 
+# write_csv(df,paste0(Sys.Date(),"_prevent_safety.csv"))
+df <- read_csv("data/prevent_safety_data.csv")
+
+```
+
+```{r}
+# recode to numerics
+df2 <- df %>% 
+  select(!q5a) %>% 
+  #select(!q5b) %>%  #fritextsvar bortplockade
+  mutate(across(starts_with("q"), ~ car::recode(.x,"'Stämmer helt'=3;'Stämmer ganska väl'=2;'Stämmer ganska dåligt'=1;'Stämmer inte alls'=0", as.factor = FALSE)))
+```
+
+## Introduktion till analys
+
+### Kort om analysmetod
+
+RISE har tagit fram fem grundläggande psykometriska kriterier som har varit utgångspunkt för analysarbetet. En artikel som beskriver kriterierna finns fritt tillgänglig som preprint [@johansson] och innehåller både en enklare och mera fördjupad beskrivning av kriterierna.
+
+Nedan finns en förenklad beskrivning av de psykometriska kriterierna på svenska, som kommer från RISE rapport till MFoF om uppföljning av föräldraskapsstöd [@preuter2022]:
+
+> När enkäter konstrueras och utvärderas bedöms dess psykometriska egenskaper, ofta kopplade till begreppen reliabilitet och validitet. Förenklat kan man säga att reliabilitet beskriver hur väl något mäts (vilken precision mätverktyget har), medan validitet beskriver hur väl innehållet i frågorna och svarskategorierna fångar det man avser att mäta. Dock råder i allmänhet oklara definitioner av begreppen och kriterier för huruvida dessa mätegenskaper uppfylls eller inte. Det medför att även enkäter som i forskningsartiklar beskrivs som "validerade" eller att de har "god reliabilitet" inte nödvändigtvis uppfyller vad som kan anses vara grundläggande kriterier. En mera omfattande beskrivning av de grundläggande psykometriska kriterierna återfinns i Bilaga 3 (separat dokument). Nedan listas kriterierna. Var och en av dem kräver psykometrisk analys av insamlade data för att bedöma.
+>
+> Lista över grundläggande psykometriska kriterier:
+>
+> -   Svarskategorierna fungerar som avsett
+> -   Frågorna fungerar likadant för olika grupper (kön, ålder, etc)
+> -   Unidimensionalitet (utan för starkt korrelerade residualer)
+> -   Frågornas svårighetsgrad passar målgruppens egenskaper/förmågor
+> -   Reliabilitet/mätosäkerheter över skalans omfång är adekvat, sett till användningsområdet
+> -   Omvandlingstabell till intervallskala
+>
+> Kriterierna ovan är ställda för att säkerställa att det är lämpligt att använda summapoäng från en enkät/skala. Summapoängen bör i sin tur användas tillsammans med en omvandlingstabell till intervallskala innan några statistiska eller matematiska beräkningar görs. Tyvärr är det mycket vanligt att forskningsstudier enbart redovisar Cronbach's alpha som ett mått på reliabilitet och/eller kvalitet på en enkät. Det är dessvärre gravt otillräckligt för att bedöma mätegenskaper hos ett mätverktyg, eftersom Cronbach's alpha inte ger information om något av kriterierna ovan.
+
+
+## Svarsbortfall
+
+```{r}
+df2 %>% 
+  select(starts_with(c("q1","q2","q3","q4"))) %>% 
+  RImissing()
+
+df2 %>% 
+  select(starts_with(c("q1","q2","q3","q4"))) %>% 
+  RImissingP(n = 20)
+```
+
+Det är många som har missing data rakt igenom. Detta kan bero på att länken är öppen och tillgänglig även för "bottar" på internet, samt de som enbart är intresserade av att titta på frågorna men ej besvara dem.
+
+Vi tittar på hur många/stor andel det rör sig om.
+
+```{r}
+df2 %>% 
+  select(starts_with(c("q1","q2","q3","q4"))) %>% 
+  mutate(Missing = rowSums(is.na(.))) %>%
+  count(Missing) %>% 
+  rename(`Antal saknade svar` = Missing) %>% 
+  kbl_rise()
+
+# all_missing <- df2 %>% 
+#   select(starts_with(c("q1","q2","q3","q4"))) %>% 
+#   mutate(Missing = rowSums(is.na(.))) %>%
+#   rownames_to_column("id") %>% 
+#   filter(Missing == 22) %>% 
+#   pull(id)
+# 
+# df2 %>% 
+#   rownames_to_column("id") %>% 
+#   filter(id %in% all_missing) %>% 
+#   select(all_of(demogr_vars)) %>% 
+#   na.omit() %>% 
+#   kbl_rise()
+```
+
+```{r}
+df3 <- df2 %>% 
+  select(id,starts_with(c("q1","q2","q3","q4"))) %>% 
+  na.omit()
+
+df3b <- df2 %>% 
+  select(id,q6,starts_with(c("q1","q2","q3","q4"))) %>% 
+  na.omit()
+
+dif_variables <- df2 %>% 
+  select(id,all_of(demogr_vars))
+
+df_dif <- left_join(df3, dif_variables, by = "id")
+
+d <- df3 %>% 
+  select(starts_with(c("q1","q2","q3","q4"))) %>% 
+  # reverse score 2 items
+  mutate(across(c(q4_4,q2_2), ~ car::recode(.x,"3=0;2=1;1=2;0=3"))
+  )
+```
+
+## Demografiska data
+
+```{r}
+#| layout-ncol: 2
+RIdemographics(df_dif$age,"Ålder")
+RIdemographics(df_dif$gender,"Kön")
+RIdemographics(df_dif$role,"Roll")
+# bransch sorterad
+df_dif %>% 
+  count(bransch) %>% 
+  mutate(Procent = round(n*100/sum(n),2)) %>% 
+  arrange(desc(Procent)) %>% 
+  rename(Bransch = bransch,
+         Antal = n) %>% 
+  kbl_rise()
+```
+
+Vi har mycket låg representation av åldersgruppen 19-29.
+
+
+```{r}
+# create DIF-variables
+dif_age <- factor(df_dif$age)
+# too few responses in other gender groups, need to recode to missing
+dif_gender <- df_dif %>% 
+  mutate(gender = recode(gender,"'Vill ej ange'=NA;'Annat'=NA", as.factor = TRUE)) %>% 
+  pull(gender)
+dif_role <- factor(df_dif$role)
+dif_bransch <- factor(df_dif$bransch)
+```
+
+## Analys steg 1
+
+### Q1 Ledningens engagemang
+
+```{r}
+df.delskala <- d %>% 
+  select(starts_with("q1"))
+```
+
+#### Deskriptiv statistik
+
+```{r}
+RIallresp(df.delskala)
+```
+
+#### Descriptives - item level
+
+```{r}
+#| column: margin
+RIlistItemsMargin(df.delskala, fontsize = 12)
+```
+
+::: panel-tabset
+##### Tile plot
+
+```{r}
+RItileplot(df.delskala)
+```
+
+##### Stacked bars
+
+```{r}
+RIbarstack(df.delskala)
+```
+
+##### Barplots
+
+```{r}
+#| layout-ncol: 2
+RIbarplot(df.delskala)
+```
+:::
+
+### Q1 Rasch-analys
+
+The eRm package, which uses Conditional Maximum Likelihood (CML)
+estimation, will be used primarily. For this analysis, the Partial
+Credit Model will be used.
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+```
+
+#### Svarskategorier
+
+```{r}
+#| layout-ncol: 2
+RIitemCats(df.delskala)
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 5
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 5
+RIitemHierarchy(df.delskala)
+```
+
+#### DIF kön
+
+```{r}
+RIdifTable(df.delskala, dif_gender)
+```
+
+#### DIF ålder
+
+```{r}
+RIdifTable(df.delskala, dif_age)
+```
+
+#### DIF roll
+
+```{r}
+RIdifTable(df.delskala, dif_role)
+```
+
+#### DIF bransch
+
+```{r}
+RIdifTable(df.delskala, dif_bransch)
+```
+
+#### Person location & infit ZSTD
+
+```{r}
+RIpfit(df.delskala)
+```
+
+#### Reliabilitet
+
+```{r}
+RItif(df.delskala, cutoff = 2.5)
+```
+:::
+
+Mycket låg reliabilitet, p.g.a. få items.
+
+### Q2 Säkert ledarskap
+
+```{r}
+df.delskala <- d %>% 
+  select(starts_with("q2"))
+```
+
+#### Deskriptiv statistik
+
+```{r}
+RIallresp(df.delskala)
+```
+
+#### Descriptives - item level
+
+```{r}
+#| column: margin
+RIlistItemsMargin(df.delskala, fontsize = 12)
+```
+
+::: panel-tabset
+##### Tile plot
+
+```{r}
+RItileplot(df.delskala)
+```
+
+##### Stacked bars
+
+```{r}
+RIbarstack(df.delskala)
+```
+
+##### Barplots
+
+```{r}
+#| layout-ncol: 2
+RIbarplot(df.delskala)
+```
+:::
+
+### Q2 Rasch-analys
+
+The eRm package, which uses Conditional Maximum Likelihood (CML)
+estimation, will be used primarily. For this analysis, the Partial
+Credit Model will be used.
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+```
+
+#### Svarskategorier
+
+```{r}
+#| layout-ncol: 2
+RIitemCats(df.delskala)
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 5
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 5
+RIitemHierarchy(df.delskala)
+```
+
+#### DIF kön
+
+```{r}
+RIdifTable(df.delskala, dif_gender)
+```
+
+#### DIF ålder
+
+```{r}
+RIdifTable(df.delskala, dif_age)
+```
+
+#### DIF roll
+
+```{r}
+RIdifTable(df.delskala, dif_role)
+```
+
+#### DIF bransch
+
+```{r}
+RIdifTable(df.delskala, dif_bransch)
+```
+
+#### Person location & infit ZSTD
+
+```{r}
+RIpfit(df.delskala)
+```
+:::
+
+Item q2_2 "Min närmsta chef har stort fokus på att kritisera misstag."
+avviker ur konstruktet. Mycket hög item fit och avvikande laddning på
+första kontrastfaktorn.
+
+Residualkorrelation mellan q2_4 och q2_6
+
+-   q2_4 Min närmsta chef påminner mig om att följa säkerhetsreglerna
+    även i pressade situationer.
+-   q2_6 Min närmsta chef involverar mig i att prata om säkra beteenden
+    och hur vi ska agera för att en olycka inte skall inträffa.
+
+### Q3 Förutsättningar
+
+```{r}
+df.delskala <- d %>% 
+  select(starts_with("q3"))
+```
+
+#### Deskriptiv statistik
+
+```{r}
+RIallresp(df.delskala)
+```
+
+#### Descriptives - item level
+
+```{r}
+#| column: margin
+RIlistItemsMargin(df.delskala, fontsize = 12)
+```
+
+::: panel-tabset
+##### Tile plot
+
+```{r}
+RItileplot(df.delskala)
+```
+
+##### Stacked bars
+
+```{r}
+RIbarstack(df.delskala)
+```
+
+##### Barplots
+
+```{r}
+#| layout-ncol: 2
+RIbarplot(df.delskala)
+```
+:::
+
+### Q3 Rasch-analys
+
+The eRm package, which uses Conditional Maximum Likelihood (CML)
+estimation, will be used primarily. For this analysis, the Partial
+Credit Model will be used.
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+```
+
+#### Svarskategorier
+
+```{r}
+#| layout-ncol: 2
+RIitemCats(df.delskala)
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 5
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 5
+RIitemHierarchy(df.delskala)
+```
+
+#### DIF kön
+
+```{r}
+RIdifTable(df.delskala, dif_gender)
+```
+
+#### DIF ålder
+
+```{r}
+RIdifTable(df.delskala, dif_age)
+```
+
+#### DIF roll
+
+```{r}
+RIdifTable(df.delskala, dif_role)
+```
+
+#### DIF bransch
+
+```{r}
+RIdifTable(df.delskala, dif_bransch)
+```
+
+#### Person location & infit ZSTD
+
+```{r}
+RIpfit(df.delskala)
+```
+:::
+
+q3_3 har låg item fit, vilket är väntat med när ett generellt item kombineras med mera specifika items som mäter aspekter av samma sak. I övrigt ser allt ok ut, möjligen undantaget DIF för roll.
+
+### Q4 Säkert medarbetarskap
+
+```{r}
+df.delskala <- d %>% 
+  select(starts_with("q4"))
+```
+
+#### Deskriptiv statistik
+
+```{r}
+RIallresp(df.delskala)
+```
+
+#### Descriptives - item level
+
+```{r}
+#| column: margin
+RIlistItemsMargin(df.delskala, fontsize = 12)
+```
+
+::: panel-tabset
+##### Tile plot
+
+```{r}
+RItileplot(df.delskala)
+```
+
+##### Stacked bars
+
+```{r}
+RIbarstack(df.delskala)
+```
+
+##### Barplots
+
+```{r}
+#| layout-ncol: 2
+RIbarplot(df.delskala)
+```
+:::
+
+### Q4 Rasch-analys
+
+The eRm package, which uses Conditional Maximum Likelihood (CML)
+estimation, will be used primarily. For this analysis, the Partial
+Credit Model will be used.
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+```
+
+#### Svarskategorier
+
+```{r}
+#| layout-ncol: 2
+RIitemCats(df.delskala)
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 5
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 5
+RIitemHierarchy(df.delskala)
+```
+
+#### DIF kön
+
+```{r}
+RIdifTable(df.delskala, dif_gender)
+```
+
+#### DIF ålder
+
+```{r}
+RIdifTable(df.delskala, dif_age)
+```
+
+#### DIF roll
+
+```{r}
+RIdifTable(df.delskala, dif_role)
+```
+
+#### DIF bransch
+
+```{r}
+RIdifTable(df.delskala, dif_bransch)
+```
+
+#### Person location & infit ZSTD
+
+```{r}
+RIpfit(df.delskala)
+```
+:::
+
+Item q4_4 avviker med hög item fit och laddning på första
+residualkontrasten. Passar inte in i konstruktet.
+
+Residualkorrelation mellan items q4_5 och q4_6.
+
+-   q4_5 Jag kan påpeka brister i säkerheten utan rädsla för negativa
+    konsekvenser.
+-   q4_6 Vi som arbetar här tar varandras synpunkter och förslag rörande
+    säkerhet på allvar.
+
+q4_6 har låg item fit och bör tas bort.
+
+### NOSACQ-frågorna
+
+```{r}
+nosacq5 <- c("q1_1","q1_2","q2_1","q3_1","q4_1")
+```
+
+```{r}
+df.delskala <- d %>% 
+  select(all_of(nosacq5))
+```
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+```
+
+#### Svarskategorier
+
+```{r}
+#| layout-ncol: 2
+RIitemCats(df.delskala)
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 5
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 5
+RIitemHierarchy(df.delskala)
+```
+
+#### DIF kön
+
+```{r}
+RIdifTable(df.delskala, dif_gender)
+```
+
+#### DIF ålder
+
+```{r}
+RIdifTable(df.delskala, dif_age)
+```
+
+#### DIF roll
+
+```{r}
+RIdifTable(df.delskala, dif_role)
+```
+
+#### DIF bransch
+
+```{r}
+RIdifTable(df.delskala, dif_bransch)
+```
+
+#### Person location & infit ZSTD
+
+```{r}
+RIpfit(df.delskala)
+```
+
+#### Reliabilitet
+
+```{r}
+RItif(df.delskala, cutoff = 2)
+```
+:::
+
+Frågorna fungerar tillsammans, dock med låg reliabilitet och något låg item fit för två items.
+
+I en norsk forskningsartikel av Ajslev och kollegor [-@ajslev2017] används fem frågor från NOSACQ-50 [@kines_nordic_2011] som återfinns i den danska arbetsmiljöundersökningen NRCWE Arbejdsmiljø og Helbred 2012. Det verkar dock inte som att dessa fem items är samma som de fem som återfinns i Prevents enkät.
+
+Det man gör i artikeln är att dikotomisera de fem frågorna, så de två
+negativa/positiva svarskategorierna slås samman, och så räknar man
+"antalet arbetsmiljöproblem" på en skala 0-5. Sedan används den variabeln för att undersöka samband med självrapporterade olyckor. Vårt dataset innehåller också en självrapporterad variabel gällande olycka, och vi återkommer till analys av samband längre fram i detta dokument.
+
+```{r}
+thetas_nosacq <- RIestThetas(df.delskala)
+```
+
+
+### Explorativ analys
+
+Även om vi har hypoteser om vilka items som ska hänga samman i separata
+områden finns ett intresse av att undersöka eventuella korsladdningar
+och annat.
+
+```{r}
+
+# Define latent variables
+latent <- list(
+  f1 = names(d)
+)
+# Write the model, and check it
+efa_0 <- write_lavaan(latent = latent)
+
+# one-factor model
+f1 <- 'efa("efa")*f1 =~ q1_1 + q1_2 + q1_3 + q2_1 + q2_2 + q2_3 + q2_4 + q2_5 + q2_6 + q3_1 + q3_2 + q3_3 + q3_4 + q3_5 + q3_6 + q3_7 + q4_1 + q4_2 + q4_3 + q4_4 + q4_5 + q4_6'
+# two-factor
+f2 <- 'efa("efa")*f1 + 
+       efa("efa")*f2 =~ q1_1 + q1_2 + q1_3 + q2_1 + q2_2 + q2_3 + q2_4 + q2_5 + q2_6 + q3_1 + q3_2 + q3_3 + q3_4 + q3_5 + q3_6 + q3_7 + q4_1 + q4_2 + q4_3 + q4_4 + q4_5 + q4_6'
+
+f3 <- 'efa("efa")*f1 + 
+       efa("efa")*f2 + 
+efa("efa")*f3 =~ q1_1 + q1_2 + q1_3 + q2_1 + q2_2 + q2_3 + q2_4 + q2_5 + q2_6 + q3_1 + q3_2 + q3_3 + q3_4 + q3_5 + q3_6 + q3_7 + q4_1 + q4_2 + q4_3 + q4_4 + q4_5 + q4_6'
+
+f4 <- 'efa("efa")*f1 + 
+       efa("efa")*f2 + 
+efa("efa")*f3 +
+efa("efa")*f4 =~ q1_1 + q1_2 + q1_3 + q2_1 + q2_2 + q2_3 + q2_4 + q2_5 + q2_6 + q3_1 + q3_2 + q3_3 + q3_4 + q3_5 + q3_6 + q3_7 + q4_1 + q4_2 + q4_3 + q4_4 + q4_5 + q4_6'
+
+f5 <- 'efa("efa")*f1 + 
+       efa("efa")*f2 + 
+efa("efa")*f3 +
+efa("efa")*f4 +
+efa("efa")*f5 =~ q1_1 + q1_2 + q1_3 + q2_1 + q2_2 + q2_3 + q2_4 + q2_5 + q2_6 + q3_1 + q3_2 + q3_3 + q3_4 + q3_5 + q3_6 + q3_7 + q4_1 + q4_2 + q4_3 + q4_4 + q4_5 + q4_6'
+
+efa_f1 <- 
+  cfa(model = f1,
+      data = d,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+efa_f2 <- 
+  cfa(model = f2,
+      data = d,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+efa_f3 <- 
+  cfa(model = f3,
+      data = d,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+efa_f4 <- 
+  cfa(model = f4,
+      data = d,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+efa_f5 <- 
+  cfa(model = f5,
+      data = d,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+```
+
+#### EFA model fit
+
+```{r}
+# define fit metrics of interest
+fit_metrics_robust <- c("chisq.scaled", "df", "pvalue.scaled", 
+                         "cfi.robust", "tli.robust", "rmsea.robust", 
+                        "rmsea.ci.lower.robust","rmsea.ci.upper.robust",
+                        "srmr")
+
+rbind(
+  fitmeasures(efa_f1, fit_metrics_robust),
+  fitmeasures(efa_f2, fit_metrics_robust),
+  fitmeasures(efa_f3, fit_metrics_robust),
+  fitmeasures(efa_f4, fit_metrics_robust),
+  fitmeasures(efa_f5, fit_metrics_robust)) %>% 
+  # wrangle
+  data.frame() %>% 
+  mutate(across(where(is.numeric),~ round(.x, 3))) %>%
+  add_column(Model = paste0("f",c(1:5)), .before = "chisq.scaled") %>% 
+  rename(Chi2 = chisq.scaled,
+         p = pvalue.scaled,
+         CFI = cfi.robust,
+         TLI = tli.robust,
+         RMSEA = rmsea.robust,
+         CI_low = rmsea.ci.lower.robust,
+         CI_high = rmsea.ci.upper.robust,
+         SRMR = srmr) %>% 
+  kbl_rise()
+```
+
+#### EFA faktorladdningar
+
+Endast 4- och 5-faktormodellerna har acceptabla model fit-värden, så vi
+tittar närmare på dem.
+
+```{r}
+inspect(efa_f4,what="std")$lambda %>% 
+  round(2) %>% 
+  as_tibble() %>% 
+  mutate(across(everything(), ~ cell_spec(.x, color = case_when(.x >= 0.4 ~ "red", TRUE ~ "black")))) %>%
+  add_column(Item = names(d), .before = 'f1') %>% 
+  formattable()
+
+inspect(efa_f5,what="std")$lambda %>% 
+  round(2) %>% 
+  as_tibble() %>% 
+  mutate(across(everything(), ~ cell_spec(.x, color = case_when(.x >= 0.4 ~ "red", TRUE ~ "black")))) %>%
+  add_column(Item = names(d), .before = 'f1') %>% 
+  formattable()
+```
+
+### CFA
+
+Vi gör en konfirmatorisk faktoranalys för att kunna titta på
+modification indices, korsladdningar och residualkorrelationer i en
+multidimensionell modell.
+
+```{r}
+
+# Define latent variables
+latent_cfa <- list(
+  ledningen = c("q1_1","q1_2","q1_3"),
+  ledarskap = c("q2_1","q2_2","q2_3","q2_4", "q2_5", "q2_6"),
+  föruts = c("q3_1","q3_2","q3_3","q3_4", "q3_5", "q3_6","q3_7"),
+  medarb = paste0("q4_",c(1:6)) 
+)
+# Write the model, and check it
+cfa_0 <- write_lavaan(latent = latent_cfa)
+
+cfa_out <- 
+  cfa(model = cfa_0,
+      data = d,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+
+rbind(fitmeasures(cfa_out, fit_metrics_robust)) %>% 
+  # wrangle
+  data.frame() %>% 
+  mutate(across(where(is.numeric),~ round(.x, 3))) %>%
+  #add_column(Model = paste0("f",c(1:5)), .before = "chisq.scaled") %>% 
+  rename(Chi2 = chisq.scaled,
+         p = pvalue.scaled,
+         CFI = cfi.robust,
+         TLI = tli.robust,
+         RMSEA = rmsea.robust,
+         CI_low = rmsea.ci.lower.robust,
+         CI_high = rmsea.ci.upper.robust,
+         SRMR = srmr) %>% 
+  kbl_rise()
+```
+
+#### Modification indices
+
+Ordnade efter storlek, störst först.
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(d, fontsize = 7)
+```
+
+#### Korsladdningar
+
+Med MI \> 10.
+
+```{r}
+modificationIndices(cfa_out,
+                    standardized = T) %>% 
+  as.data.frame(row.names = NULL) %>% 
+  filter(mi > 10,
+         op == "=~") %>% 
+  arrange(desc(mi)) %>% 
+  mutate(across(where(is.numeric),~ round(.x, 3))) %>%
+  kbl_rise(fontsize = 14, tbl_width = 75)
+```
+
+#### Residualkorrelationer
+
+```{r}
+modificationIndices(cfa_out,
+                    standardized = T) %>% 
+  as.data.frame(row.names = NULL) %>% 
+  filter(mi > 10,
+         op == "~~") %>% 
+  arrange(desc(mi)) %>% 
+  mutate(across(where(is.numeric),~ round(.x, 3))) %>%
+  kbl_rise(fontsize = 14, tbl_width = 75)
+```
+
+### Rasch explorativ
+
+Vi provar att lägga in alla 22 items i en Rasch-modell.
+
+```{r}
+df.delskala <- d
+```
+
+
+The eRm package, which uses Conditional Maximum Likelihood (CML)
+estimation, will be used primarily. For this analysis, the Partial
+Credit Model will be used.
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 11
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 11
+RIitemHierarchy(df.delskala)
+```
+:::
+
+Vi tar bort q2_2 och q4_4, samt löser ut de residualkorrelationer som även tidigare setts genom att ta bort: q4_6, q2_6, q2_5.
+
+### Rasch expl 2
+
+```{r}
+rem_item <- c("q2_2", "q4_4", "q4_6", "q2_6", "q2_5")
+df.delskala <- d %>% 
+  select(!all_of(rem_item))
+
+```
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 11
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 11
+RIitemHierarchy(df.delskala)
+```
+:::
+
+Det är tydligt att det finns multidimensionalitet i data, även efter att ha tagit bort våra mest problematiska items. Detta framgår utifrån PCA av residualer samt residualkorrelationer. Således avbryter vi denna explorativa analys.
+
+## Kommentarer steg 1
+
+### Generellt
+
+Reverserade items (q4_4 och q2_2) funkar dåligt dimensionalitetsmässigt.
+
+-   q2_2 Min närmsta chef har stort fokus på att kritisera misstag.
+-   q4_4 Ibland tar vi genvägar i arbetet för att arbetsvardagen ska bli
+    smidigare, även om det kan innebära ökad risk.
+
+Ev. titta närmare på:
+
+-   DIF för roll gällande "Förutsättningar".
+-   DIF för ålder gällande "Säkert Medarbetarskap".
+
+### Ledningens engagemang
+
+Låg reliabilitet p.g.a. få items. Låg item fit för två items.
+
+### Säkert ledarskap
+
+Item q2_2 "Min närmsta chef har stort fokus på att kritisera misstag."
+avviker ur konstruktet. Mycket hög item fit och avvikande laddning på
+första kontrastfaktorn.
+
+Residualkorrelation mellan q2_4 och q2_6
+
+-   q2_4 Min närmsta chef påminner mig om att följa säkerhetsreglerna
+    även i pressade situationer.
+-   q2_6 Min närmsta chef involverar mig i att prata om säkra beteenden
+    och hur vi ska agera för att en olycka inte skall inträffa.
+
+### Förutsättningar
+
+q3_3 har låg item fit, vilket är väntat med när ett generellt item kombineras med mera specifika items som mäter aspekter av samma sak. I övrigt ser allt ok ut, möjligen undantaget DIF för roll.
+
+q3_3 kan tas bort. q3_4-6 hanterar
+området bättre pga högre specificitet (tydligare avgränsning) i
+frågeställningarna.
+
+### Säkert medarbetarskap
+
+Item q4_4 avviker med hög item fit och laddning på första
+residualkontrasten. Passar inte in i konstruktet.
+
+Residualkorrelation mellan items q4_5 och q4_6.
+
+-   q4_5 Jag kan påpeka brister i säkerheten utan rädsla för negativa
+    konsekvenser.
+-   q4_6 Vi som arbetar här tar varandras synpunkter och förslag rörande
+    säkerhet på allvar.
+
+q4_6 har låg item fit och bör tas bort.
+
+### Utifrån EFA/CFA multidimensionell analys
+
+q2_1 och q3_7 hänger mer ihop med q1 (ledningen), q3_7 även med q2 -
+q2_1 Jag anser att ambitionen att minska antalet olyckor genomsyrar det
+dagliga arbetet. - q3_7 Jag upplever att risker åtgärdas när de
+påtalats.
+
+Residualkorrelation mellan q3_7 och q2_5: - q2_5 Min närmsta chef
+lyssnar och agerar när jag berättar om något som inte fungerar gällande
+säkerheten.
+
+q2_2 funkar som nämnt inte bra, men noterar intressant
+residualkorrelation med q4_5
+
+-   q4_5 Jag kan påpeka brister i säkerheten utan rädsla för negativa
+    konsekvenser.
+-   q2_2 Min närmsta chef har stort fokus på att kritisera misstag.
+
+q4_5 korsladdar på q3 i 4-faktors CFA
+
+### Åtgärder att testa
+
+#### q2
+
+q2_2 tas bort, q2_1 flyttas till q1
+
+#### q3
+
+q3_3 tas bort pga redundans. q3_7 flyttas till q1
+
+#### q4
+
+q4_5 har residualkorrelation med q4_6, kan ev fungera bättre i q3 så vi
+flyttar den dit.
+
+q4_4 tas bort
+
+## Analys steg 2
+
+### Q1 Ledningens engagemang
+
+- q2_1 flyttas till q1 
+- q3_7 flyttas till q1
+
+```{r}
+df.delskala <- d %>% 
+  select(starts_with("q1"),q2_1,q3_7)
+```
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+```
+
+#### Svarskategorier
+
+```{r}
+#| layout-ncol: 2
+RIitemCats(df.delskala)
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 5
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 5
+RIitemHierarchy(df.delskala)
+```
+
+#### DIF kön
+
+```{r}
+RIdifTable(df.delskala, dif_gender)
+```
+
+#### DIF ålder
+
+```{r}
+RIdifTable(df.delskala, dif_age)
+```
+
+#### DIF roll
+
+```{r}
+RIdifTable(df.delskala, dif_role)
+```
+
+#### DIF bransch
+
+```{r}
+RIdifTable(df.delskala, dif_bransch)
+```
+
+#### Person location & infit ZSTD
+
+```{r}
+RIpfit(df.delskala)
+```
+
+#### Reliabilitet
+
+```{r}
+RItif(df.delskala, cutoff = 2)
+```
+#### Itemparametrar
+```{r}
+RIitemparams(df.delskala)
+RIitemparams(df.delskala,output = "file",filename = "q1_params.csv")
+```
+#### Ordinal -> intervall
+```{r}
+RIscoreSE(df.delskala,score_range = c(-6,8))
+RIscoreSE(df.delskala,score_range = c(-6,8),output = "figure")
+```
+
+:::
+
+```{r}
+items_q1 <- names(df.delskala)
+thetas_q1 <- RIestThetas(df.delskala,theta_range = c(-6,8))
+```
+
+### Q2 Säkert ledarskap
+
+- q2_2 tas bort
+- q2_1 flyttas till q1
+
+```{r}
+df.delskala <- d %>% 
+  select(starts_with("q2")) %>% 
+  select(!c(q2_1,q2_2))
+
+```
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+
+```
+
+#### Svarskategorier
+
+```{r}
+#| layout-ncol: 2
+RIitemCats(df.delskala)
+
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 5
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 5
+RIitemHierarchy(df.delskala)
+
+```
+
+#### DIF kön
+
+```{r}
+RIdifTable(df.delskala, dif_gender)
+
+```
+
+#### DIF ålder
+
+```{r}
+RIdifTable(df.delskala, dif_age)
+
+```
+
+#### DIF roll
+
+```{r}
+RIdifTable(df.delskala, dif_role)
+
+```
+
+#### DIF bransch
+
+```{r}
+RIdifTable(df.delskala, dif_bransch)
+
+```
+
+#### Person location & infit ZSTD
+
+```{r}
+RIpfit(df.delskala)
+
+```
+
+#### Reliabilitet
+
+```{r}
+RItif(df.delskala, cutoff = 2)
+
+```
+#### Itemparametrar
+```{r}
+RIitemparams(df.delskala)
+
+RIitemparams(df.delskala,output = "file",filename = "q2_params.csv")
+
+```
+#### Ordinal -> intervall
+```{r}
+RIscoreSE(df.delskala,score_range = c(-6,8))
+RIscoreSE(df.delskala,score_range = c(-6,8), output = "figure")
+```
+:::
+
+```{r}
+items_q2 <- names(df.delskala)
+thetas_q2 <- RIestThetas(df.delskala,theta_range = c(-6,8))
+
+```
+
+### Q3 Förutsättningar
+
+- q3_3 tas bort pga redundans
+- q3_7 flyttas till q1
+
+```{r}
+df.delskala <- d %>% 
+  select(starts_with("q3"),q4_5) %>% 
+  select(!c(q3_3,q3_7))
+```
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+```
+
+#### Svarskategorier
+
+```{r}
+#| layout-ncol: 2
+RIitemCats(df.delskala)
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 5
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 5
+RIitemHierarchy(df.delskala)
+```
+
+#### DIF kön
+
+```{r}
+RIdifTable(df.delskala, dif_gender)
+```
+
+#### DIF ålder
+
+```{r}
+RIdifTable(df.delskala, dif_age)
+```
+
+#### DIF roll
+
+```{r}
+RIdifTable(df.delskala, dif_role)
+```
+
+#### DIF bransch
+
+```{r}
+RIdifTable(df.delskala, dif_bransch)
+```
+
+#### Person location & infit ZSTD
+
+```{r}
+RIpfit(df.delskala)
+```
+
+#### Reliabilitet
+
+```{r}
+RItif(df.delskala, cutoff = 2)
+```
+#### Itemparametrar
+```{r}
+RIitemparams(df.delskala)
+RIitemparams(df.delskala,output = "file",filename = "q3_params.csv")
+```
+#### Ordinal -> intervall
+```{r}
+RIscoreSE(df.delskala,score_range = c(-6,8))
+RIscoreSE(df.delskala,score_range = c(-6,8),output = "figure")
+```
+:::
+
+```{r}
+items_q3 <- names(df.delskala)
+thetas_q3 <- RIestThetas(df.delskala,theta_range = c(-6,8))
+```
+
+
+
+### Q4 Säkert medarbetarskap
+
+q4_5 har residualkorrelation med q4_6, kan ev fungera bättre i q3 så vi
+flyttar den dit.
+
+q4_4 tas bort.
+
+```{r}
+df.delskala <- d %>% 
+  select(starts_with("q4")) %>% 
+  select(!c(q4_4,q4_5))
+```
+
+```{r}
+#| column: margin
+#| echo: false
+RIlistItemsMargin(df.delskala, fontsize = 13)
+```
+
+::: panel-tabset
+#### Item fit
+
+```{r}
+RIitemfitPCM2(df.delskala, 250, 32)
+```
+
+#### PCA
+
+```{r}
+#| tbl-cap: "PCA of Rasch model residuals"
+RIpcmPCA(df.delskala)
+```
+
+#### Residualkorrelationer
+
+```{r}
+RIresidcorr(df.delskala, cutoff = 0.2)
+```
+
+#### 1st contrast loadings
+
+```{r}
+RIloadLoc(df.delskala)
+```
+
+#### Svarskategorier
+
+```{r}
+#| layout-ncol: 2
+RIitemCats(df.delskala)
+```
+
+#### Targeting
+
+```{r}
+#| fig-height: 5
+# increase fig-height above as needed, if you have many items
+RItargeting(df.delskala)
+```
+
+#### Item-hierarki
+
+```{r}
+#| fig-height: 5
+RIitemHierarchy(df.delskala)
+```
+
+#### DIF kön
+
+```{r}
+RIdifTable(df.delskala, dif_gender)
+```
+
+#### DIF ålder
+
+```{r}
+RIdifTable(df.delskala, dif_age)
+```
+
+#### DIF roll
+
+```{r}
+RIdifTable(df.delskala, dif_role)
+```
+
+#### DIF bransch
+
+```{r}
+RIdifTable(df.delskala, dif_bransch)
+```
+
+#### Person location & infit ZSTD
+
+```{r}
+RIpfit(df.delskala)
+```
+
+#### Reliabilitet
+
+```{r}
+RItif(df.delskala, cutoff = 2)
+```
+#### Itemparametrar
+```{r}
+RIitemparams(df.delskala)
+RIitemparams(df.delskala,output = "file",filename = "q4_params.csv")
+```
+#### Ordinal -> intervall
+```{r}
+RIscoreSE(df.delskala,score_range = c(-6,8))
+RIscoreSE(df.delskala,score_range = c(-6,8),output = "figure")
+```
+:::
+
+
+```{r}
+items_q4 <- names(df.delskala)
+thetas_q4 <- RIestThetas(df.delskala,theta_range = c(-6,8))
+
+```
+
+## Summering delskalor
+
+```{r}
+data.frame(thetas_q1, thetas_q2, thetas_q3, thetas_q4, thetas_nosacq) %>% 
+  write_csv("thetas.csv")
+df_thetas <- read_csv("thetas.csv")
+```
+
+
+Här är items fördelade på delskalor.
+
+```{r}
+data.frame(
+  delskala = c("Ledningens Engagemang","Säkert ledarskap","Förutsättningar","Säkert medarbetarskap"),
+  items = c(paste(items_q1, collapse = ", "),
+            paste(items_q2, collapse = ", "),
+            paste(items_q3, collapse = ", "),
+            paste(items_q4, collapse = ", ")),
+  stringsAsFactors = FALSE
+) %>% 
+  knitr::kable()
+```
+
+Eftersom vi flyttat runt items en del dubbelkollar vi så det inte blivit
+någon dubblett.
+
+```{r}
+# check for duplicates
+duplicated(c(items_q1,items_q2,items_q3,items_q4))
+```
+
+```{r}
+# make a table similar to the one above, but add in itemlabels for item descriptions
+items_final_set <- data.frame(
+  delskala = c(rep("Ledningens Engagemang", length(items_q1)),
+               rep("Säkert ledarskap", length(items_q2)),
+               rep("Förutsättningar", length(items_q3)),
+               rep("Säkert medarbetarskap", length(items_q4))
+  ),
+  itemnr = c(items_q1,items_q2,items_q3,items_q4),
+  stringsAsFactors = FALSE
+) %>% 
+  left_join(itemlabels, by = "itemnr")
+
+items_final_set %>%
+  kbl_rise() %>% 
+  collapse_rows(columns = 1)
+
+#write_csv(items_final_set, "items_final_set.csv")
+```
+
+Av de 22 items som prövats i denna analys har 3 tagits bort:
+
+-   q2_2 Min närmsta chef har stort fokus på att kritisera misstag.
+-   q3_3 Jag upplever att jag har rätt förutsättningar för att kunna
+    jobba säkert.
+-   q4_4 Ibland tar vi genvägar i arbetet för att arbetsvardagen ska bli
+    smidigare, även om det kan innebära ökad risk.
+
+Både q2_2 och q4_4 har tagits bort på grund av att de inte passar in,
+vilket delvis kan bero på att de är de enda negativt formulerade
+frågorna (som därmed har reverserad svarsskala i analysen). Gällande
+q3_3 hade den kunnat vara kvar, men delskalan fungerar tillräckligt bra
+utan den, och den tillförde relativt lite information eftersom det är en
+generell fråga om förutsättningar.
+
+### CFA nya delskalor
+
+Vi gör en CFA på de nya delskalorna, och passar på att lägga till en
+"higher order" latent variabel utifrån de fyra delskalorna.
+
+```{r}
+
+# Define latent variables
+latent_cfa2 <- list(
+  ledningen = items_q1,
+  ledarskap = items_q2,
+  föruts = items_q3,
+  medarb = items_q4,
+  säkerhet = c("ledningen", "ledarskap", "föruts", "medarb")
+)
+# Write the model, and check it
+cfa_2 <- write_lavaan(latent = latent_cfa2)
+
+cfa_out2 <- 
+  cfa(model = cfa_2,
+      data = d,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+
+# define fit metrics of interest
+fit_metrics_robust <- c("chisq.scaled", "df", "pvalue.scaled", 
+                         "cfi.robust", "tli.robust", "rmsea.robust", 
+                        "rmsea.ci.lower.robust","rmsea.ci.upper.robust",
+                        "srmr")
+
+rbind(fitmeasures(cfa_out2, fit_metrics_robust)) %>% 
+  # wrangle
+  data.frame() %>% 
+  mutate(across(where(is.numeric),~ round(.x, 3))) %>%
+  #add_column(Model = paste0("f",c(1:5)), .before = "chisq.scaled") %>% 
+  rename(Chi2 = chisq.scaled,
+         p = pvalue.scaled,
+         CFI = cfi.robust,
+         TLI = tli.robust,
+         RMSEA = rmsea.robust,
+         CI_low = rmsea.ci.lower.robust,
+         CI_high = rmsea.ci.upper.robust,
+         SRMR = srmr) %>% 
+  kbl_rise()
+```
+
+#### Faktorladdningar
+
+```{r}
+#| fig-width: 8
+lavaanPlot(model = cfa_out2, 
+           coefs = T, stand = T, covs = T,
+           node_options = list(fontname = "Helvetica", fontsize = 18), 
+           edge_options = list(color = "grey", fontsize = 18),
+           graph_options = list(rankdir = "TD"))
+
+```
+
+#### Modification indices
+
+Ordnade efter storlek, störst först.
+
+```{r}
+#| column: margin
+#| echo: false
+
+d %>% 
+  select(all_of(items_final_set$itemnr)) %>%
+  RIlistItemsMargin(fontsize = 7)
+```
+
+#### Korsladdningar
+
+Med MI \> 10.
+
+```{r}
+modificationIndices(cfa_out2,
+                    standardized = T) %>% 
+  as.data.frame(row.names = NULL) %>% 
+  filter(mi > 10,
+         op == "=~") %>% 
+  arrange(desc(mi)) %>% 
+  mutate(across(where(is.numeric),~ round(.x, 3))) %>%
+  kbl_rise(fontsize = 14, tbl_width = 75)
+```
+
+#### Residualkorrelationer
+
+```{r}
+modificationIndices(cfa_out2,
+                    standardized = T) %>% 
+  as.data.frame(row.names = NULL) %>% 
+  filter(mi > 10,
+         op == "~~") %>% 
+  arrange(desc(mi)) %>% 
+  mutate(across(where(is.numeric),~ round(.x, 3))) %>%
+  kbl_rise(fontsize = 14, tbl_width = 75)
+```
+
+### Korrelation mellan delskalorna
+
+```{r}
+# Define latent variables
+latent_cfa3 <- list(
+  ledningen = items_q1,
+  ledarskap = items_q2,
+  föruts = items_q3,
+  medarb = items_q4
+  #säkerhet = c("ledningen", "ledarskap", "föruts", "medarb")
+)
+# Write the model, and check it
+cfa_3 <- write_lavaan(latent = latent_cfa3)
+
+cfa_out3 <- 
+  cfa(model = cfa_3,
+      data = d,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+
+cfa_summary3 <- summary(cfa_out3, standardized = TRUE)
+
+cfa_summary3[["pe"]] %>% 
+  as.data.frame() %>% 
+  filter(op == "~~",
+         !str_detect(lhs,"q"),
+         !lhs == rhs) %>% 
+  select(!c(exo,pvalue)) %>% 
+  mutate_if(is.numeric, ~ round(., 3)) %>%
+  kbl_rise()
+```
+
+### CFA övergripande säkerhet
+
+Utifrån estimerade mätvärden (thetas) från varje delskala.
+
+```{r}
+# Define latent variables
+latent_cfa2nd <- list(
+  säkerhet = names(df_thetas[c(1:4)])
+)
+# Write the model, and check it
+cfa_2nd <- write_lavaan(latent = latent_cfa2nd)
+
+cfa_out2nd <- 
+  cfa(model = cfa_2nd,
+      data = df_thetas,
+      rotation = "oblimin",
+      estimator = "MLR")
+
+# define fit metrics of interest
+fit_metrics_robust <- c("chisq.scaled", "df", "pvalue.scaled", 
+                         "cfi.robust", "tli.robust", "rmsea.robust", 
+                        "rmsea.ci.lower.robust","rmsea.ci.upper.robust",
+                        "srmr")
+
+rbind(fitmeasures(cfa_out2nd, fit_metrics_robust)) %>% 
+  # wrangle
+  data.frame() %>% 
+  mutate(across(where(is.numeric),~ round(.x, 3))) %>%
+  #add_column(Model = paste0("f",c(1:5)), .before = "chisq.scaled") %>% 
+  rename(Chi2 = chisq.scaled,
+         p = pvalue.scaled,
+         CFI = cfi.robust,
+         TLI = tli.robust,
+         RMSEA = rmsea.robust,
+         CI_low = rmsea.ci.lower.robust,
+         CI_high = rmsea.ci.upper.robust,
+         SRMR = srmr) %>% 
+  kbl_rise()
+```
+
+```{r}
+lavaanPlot(model = cfa_out2nd, 
+           coefs = T, stand = T, covs = T,
+           node_options = list(fontname = "Helvetica", fontsize = 18), 
+           edge_options = list(color = "grey", fontsize = 18),
+           graph_options = list(rankdir = "TD"))
+
+```
+
+
+## Meta-frågor om enkäten
+
+```{r}
+itemlabels_all %>% 
+  filter(itemnr %in% c("q5a","q5b")) %>% 
+  kbl_rise()
+```
+
+### Kvantitativ fråga
+
+```{r}
+#| fig-width: 8
+#| fig-height: 6
+
+# svarskategorier <- df %>%
+#   select(q5a) %>%
+#   pivot_longer(everything()) %>%
+#   na.omit() %>%
+#   distinct(value) %>%
+#   pull(value)
+
+total_n <- df %>%
+  select(q5a) %>%
+  na.omit() %>%
+  nrow()
+  
+q5a_long <- df %>% 
+  select(q5a) %>% 
+  pivot_longer(everything()) %>%
+  na.omit() %>% 
+  count(name, value) %>% # räkna hur många individer i varje svarskategori
+  mutate(Procent = (100 * n / sum(n))) %>% # räkna fram procent för varje svarskategori
+  mutate(across(where(is.numeric), ~ round(.x, 2))) %>%
+  rename(
+    Svarskategori = value, # byt namn på variabler inför skapande av figur.
+    Fråga = name
+  ) %>%
+  left_join(itemlabels, by = join_by("Fråga" == "itemnr"))
+
+q5a_long %>% 
+  ggplot(aes(x = Svarskategori, y = Procent, fill = Svarskategori)) +
+  scale_y_continuous(limits = c(0,75), breaks = seq(0,100,10)) + # starta alltid y på 0
+  scale_x_discrete(guide = guide_axis(n.dodge = 1),
+                   labels = ~ str_wrap(as.character(.x), 18)) + 
+  geom_col() +
+  geom_text(aes(label = paste0("n = ",n)), color = "darkgrey",
+            size = 4,
+            position = position_dodge(width = 0.9),
+            vjust = -0.4) +
+  scale_fill_viridis_d(direction = -1) + 
+  theme_prevent() +
+  theme(legend.position = "none"
+        ) +
+  labs(title = str_wrap("Tycker du att frågorna täcker in det som är viktigt för att beskriva de grundläggande aspekterna av säkerhetskulturen på en arbetsplats?",59),
+       subtitle = paste0("Antal svar totalt: ",total_n,
+                         ". Andel positiva: ",q5a_long[1,4] + q5a_long[2,4],"%."),
+       caption = str_wrap("Staplarnas höjd anger andel (%) av respondenterna som svarat i respektive svarskategori. Siffran ovanför staplarna anger antalet respondenter som svarat i den kategorin.", 100))
+```
+
+### Fritextkommentarer
+
+```{r}
+#| eval: false
+fritext_n <- df %>% 
+  select(q5b) %>% 
+  na.omit() %>% 
+  nrow()
+```
+
+73 fritextsvar. Vi samlar dem i en CSV-fil. Dessa tillgängliggörs ej med annan data eftersom respondenter kan skriva vad som helst i detta fält.
+
+```{r}
+#| eval: false
+write_csv(na.omit(df$q5b) %>% as.data.frame(), "fritext.csv")
+```
+
+## Varit med om olycka?
+
+```{r}
+#| fig-width: 9
+#| fig-height: 6
+total_n_q6 <- df %>%
+  select(q6) %>%
+  na.omit() %>%
+  nrow()
+
+q6_long <- df %>% 
+    select(q6) %>% 
+    pivot_longer(everything()) %>%
+    na.omit() %>% 
+    count(name, value) %>% # räkna hur många individer i varje svarskategori
+    mutate(Procent = (100 * n / sum(n))) %>% # räkna fram procent för varje svarskategori
+    mutate(across(where(is.numeric), ~ round(.x, 2))) %>%
+    rename(
+      Svarskategori = value, # byt namn på variabler inför skapande av figur.
+      Fråga = name
+    ) %>%
+    add_column(item = "Har du det senaste året varit med om en eller flera arbetsplatsolyckor som resulterat i mer än en dags frånvaro från arbetet?")
+
+q6_long %>% 
+    ggplot(aes(x = Svarskategori, y = Procent, fill = Svarskategori)) +
+    scale_y_continuous(limits = c(0,75), breaks = seq(0,100,10)) + # starta alltid y på 0
+    #scale_x_discrete(labels = c(0:length(svarskategorier))) + # byt etikett på x axeln så det blir mindre text i figuren
+    geom_col() +
+    geom_text(aes(label = paste0("n = ",n)), color = "darkgrey",
+              size = 4,
+              position = position_dodge(width = 0.9),
+              vjust = -0.5) +
+    scale_fill_viridis_d(direction = -1) +
+    theme(legend.position = "none",
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank()) +
+  theme_prevent() +
+    labs(title = str_wrap("Har du det senaste året varit med om en eller flera arbetsplatsolyckor som resulterat i mer än en dags frånvaro från arbetet?",70),
+         subtitle = paste0("Antal svar totalt: ",total_n_q6),
+         caption = str_wrap("Staplarnas höjd anger andel (%) av respondenterna som svarat i respektive svarskategori. Siffran ovanför staplarna anger antalet respondenter (n) som svarat i den kategorin.", 100))
+```
+
+### Strukturell ekvationsmodell
+
+```{r}
+d_sem <- df2 %>% 
+  select(starts_with(c("q1","q2","q3","q4")),q6,id) %>% 
+  mutate(q6dik = ifelse(q6 == "Nej",0,1)) %>% 
+  filter(id %in% df3$id)
+
+d_sem %>% 
+  count(q6,q6dik)
+
+d_sem <- cbind(d_sem,df_thetas)
+
+nosacq5 <- c("q1_1","q1_2","q2_1","q3_1","q4_1")
+
+final.items <- read_csv("items_final_set.csv")
+items_q1 <- final.items %>% 
+  filter(delskala == "Ledningens Engagemang") %>%
+  pull(itemnr)
+items_q2 <- final.items %>% 
+  filter(delskala == "Säkert ledarskap") %>%
+  pull(itemnr)
+items_q3 <- final.items %>%
+  filter(delskala == "Förutsättningar") %>%
+  pull(itemnr)
+items_q4 <- final.items %>%
+  filter(delskala == "Säkert medarbetarskap") %>%
+  pull(itemnr)
+
+# Define latent variables
+latent_cfa2 <- list(
+  ledningen = items_q1,
+  ledarskap = items_q2,
+  föruts = items_q3,
+  medarb = items_q4,
+  säkerhet = c("ledningen", "ledarskap", "föruts", "medarb")
+)
+
+# Define latent variables
+latent_cfa3 <- list(
+  ledningen = items_q1,
+  ledarskap = items_q2,
+  föruts = items_q3,
+  medarb = items_q4
+)
+```
+
+#### Säkerhet som latent prediktor för olycka
+
+Med övergripande "säkerhet" som latent variabel och prediktor för utfallet olycka (q6) dikotomiserat, d.v.s. där frekvensen av olyckor inte tas med, utan bara ja/nej. Vi har såpass få respondenter som angett att de varit med om olyckor att vi inte kan använda det mera graderade utfallet.
+
+```{r}
+regression1 <- list(
+  q6dik = "säkerhet"
+)
+
+# Write the model, and check it
+sem1 <- write_lavaan(latent = latent_cfa2,
+                    regression = regression1)
+
+sem1_out <- 
+  sem(model = sem1,
+      data = d_sem,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+
+sem1_reg <- lavaan_reg(sem1_out)
+lavaan_reg(sem1_out, nice_table = TRUE, highlight = TRUE)
+exp(sem1_reg$b)
+#lavPredictY(sem1_out, xnames = "säkerhet", ynames = "q6dik")
+
+# https://stats.stackexchange.com/questions/596407/comparing-lavaansem-to-probit-regression-output
+coef(sem1_out)["q6dik|t1"]
+```
+
+#### De fyra delskalorna som separata latenta prediktorer
+
+```{r}
+regression2 <- list(
+  q6dik = c("ledningen", "ledarskap", "föruts", "medarb")
+)
+# Write the model, and check it
+sem_2 <- write_lavaan(latent = latent_cfa3,
+                      regression = regression2)
+
+sem_out2 <- 
+  sem(model = sem_2,
+      data = d_sem,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+
+#summary(sem2_out)
+#lavaan_reg(sem2_out)
+lavaan_reg(sem_out2, nice_table = TRUE, highlight = TRUE)
+```
+
+#### De fyra delskalorna som prediktorer 
+
+med estimerade mätvärden.
+
+```{r}
+glm_all_theta <- glm(q6dik ~ thetas_q1 + thetas_q2 + thetas_q3 + thetas_q4, data = d_sem, family = binomial(link = "probit")) #probit is same as lavaan SEM uses
+
+tidy(glm_all_theta)
+```
+
+#### NOSACQ-frågorna som latent prediktor
+
+```{r}
+regression3 <- list(
+  q6dik = "nosacq"
+)
+
+latent_cfa4 <- list(
+  nosacq = nosacq5
+)
+
+# Write the model, and check it
+sem3 <- write_lavaan(latent = latent_cfa4,
+                    regression = regression3)
+
+sem3_out <- 
+  sem(model = sem3,
+      data = d_sem,
+      rotation = "oblimin",
+      estimator = "WLSMV",
+      ordered = TRUE)
+
+sem3_reg <- lavaan_reg(sem3_out)
+lavaan_reg(sem3_out, nice_table = TRUE, highlight = TRUE)
+exp(sem3_reg$b)
+
+```
+
+#### NOSACQ estimerade mätvärden
+
+Plot av rådata med jitter på den dikotomiserade variabeln (bara 0 och 1 är möjliga svar).
+
+```{r}
+ggplot(
+  d_sem,
+  aes(x = thetas_nosacq, y = q6dik)
+) +
+  geom_jitter(width = 0.02, height = 0.02) +
+  geom_smooth(method = "loess") +
+  scale_y_continuous(breaks = c(0, 1)) +
+  geom_vline(xintercept = 1.5, linetype = "dashed") +
+  labs(
+    x = "Estimerade mätvärden (theta) för de fem NOSACQ-frågorna",
+    y = "Varit med om olycka (1) eller inte(0)", title = "Rådata"
+  )
+
+```
+
+Ser ut som att vi når "botten" vid nosacq theta = 1.5?
+
+##### glm()
+
+Vi passar på att testa de två R-paketen som implementerar Firth's penalized logistic regression, som är allmänt rekommenderat vid mindre sampelstorlekar och/eller vid lågfrekventa utfall i data. Först kommer vanlig logistisk regression, sedan Firth's justerade metod två gånger.
+
+```{r}
+glm_nosacq_theta <- glm(q6dik ~ thetas_nosacq, data = d_sem, family = binomial(link = "logit"))
+
+tidy(glm_nosacq_theta)
+plot_predictions(glm_nosacq_theta, by = "thetas_nosacq") +#, transform = "exp")
+    labs(
+    x = "Estimerade mätvärden (theta) för de fem NOSACQ-frågorna",
+    y = "Varit med om olycka (1) eller inte(0)", title = "Predicerade värden i statistisk modell", subtitle = "glm(q6dik ~ thetas_nosacq, data = d_sem, family = binomial(link = 'logit'))"
+  )
+  
+library(logistf)
+glm_nosacq_theta_p <- logistf(q6dik ~ thetas_nosacq, data = d_sem, family = binomial(link = "logit"))
+summary(glm_nosacq_theta_p)
+  
+library(brglm2)
+glm_nosacq_theta_p2 <- glm(q6dik ~ thetas_nosacq, data = d_sem, family = binomial(link = "logit"), method = "brglmFit")
+tidy(glm_nosacq_theta_p2)
+plot_predictions(glm_nosacq_theta_p2, by = "thetas_nosacq") +#, transform = "exp")
+    labs(
+    x = "Estimerade mätvärden (theta) för de fem NOSACQ-frågorna",
+    y = "Varit med om olycka (1) eller inte(0)", title = "Predicerade värden i statistisk modell", subtitle = "glm(q6dik ~ thetas_nosacq, data = d_sem, family = binomial(link = 'logit'), method = 'brglmFit')"
+  )
+```
+
+Denna metod fångar inte "utplaningen" som sker efter x ~ 1.5, så vi behöver hitta en analysmetod som bättre passar data.
+
+##### gam()
+
+```{r}
+library(mgcViz) # https://mfasiolo.github.io/mgcViz/articles/mgcviz.html
+b <- gam(q6dik ~ s(thetas_nosacq), data = d_sem, method = "REML")
+# b <- getViz(b)
+# plot( sm(b, 1) )
+# 
+# lowest <- predict.gam(b) %>% min()
+predict.gam(b) %>% 
+  as.data.frame() %>% 
+  ggplot(aes(.)) + 
+  geom_histogram() +
+  xlab("Predicted values")
+
+plot_predictions(b, condition = "thetas_nosacq") #transform = "exp")
+plot_predictions(b, condition = "thetas_nosacq", transform = "exp") + labs(y = "q6dik exponentiated")
+#plot_slopes(b, variables = "thetas_nosacq", condition = "thetas_nosacq")
+```
+
+Här är nosacq_theta = 2 "botten". Det ser också rimligt ut som gränsvärde utifrån targetingfiguren (sektion 4.11), och motsvarar att ha svarat nästa högsta svarsalternativet på alla fem frågorna.
+
+#### NOSACQ sum scores gam()
+
+```{r}
+d_sem <- d_sem %>% 
+  mutate(nosacq_sumscore = rowSums(across(all_of(nosacq5))))
+
+hist(d_sem$nosacq_sumscore, breaks = 15)
+abline(v = mean(d_sem$nosacq_sumscore))
+
+b2 <- gam(q6dik ~ s(nosacq_sumscore), data = d_sem, method = "REML")
+# b <- getViz(b)
+# plot( sm(b, 1) )
+# 
+# lowest <- predict.gam(b) %>% min()
+predict.gam(b2) %>% 
+  as.data.frame() %>% 
+  ggplot(aes(.)) + 
+  geom_histogram() +
+  xlab("Predicted values")
+
+plot_predictions(b2, condition = "nosacq_sumscore") + scale_x_continuous(breaks = seq(0,15,2)) #transform = "exp")
+plot_predictions(b2, condition = "nosacq_sumscore", transform = "exp") + labs(y = "q6dik exponentiated") + scale_x_continuous(breaks = seq(0,15,2))
+#plot_slopes(b2, variables = "nosacq_sumscore", condition = "nosacq_sumscore")
+```
+
+Sum score 10 = svarsalternativ 2 på alla fem frågorna. Men även 8-9 verkar ge goda utfall (1-2 frågor med svar "Stämmer ganska dåligt"). Allt detta med reservation för att vi har ett litet sampel.
+
+
+## Programvara som använts för analyserna
+
+```{r}
+pkgs <- cite_packages(cite.tidyverse = TRUE, 
+                      output = "table",
+                      bib.file = "grateful-refs.bib",
+                      include.RStudio = TRUE,
+                      out.dir = getwd())
+formattable(pkgs, 
+            table.attr = 'class=\"table table-striped\" style="font-size: 15px; font-family: Lato; width: 80%"')
+
+```
+
+```{r}
+sessionInfo()
+```
+
+## Referenser
