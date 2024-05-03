@@ -141,7 +141,6 @@ demogr_vars <- as.character(expression(age,gender,role,bransch))
 # 
 # write_csv(df,paste0(Sys.Date(),"_prevent_safety.csv"))
 df <- read_csv("data/prevent_safety_data.csv")
-
 ```
 
 ```{r}
@@ -2136,24 +2135,32 @@ q5a_long <- df %>%
   ) %>%
   left_join(itemlabels, by = join_by("Fråga" == "itemnr"))
 
-q5a_long %>% 
+q5a_long %>%
   ggplot(aes(x = Svarskategori, y = Procent, fill = Svarskategori)) +
-  scale_y_continuous(limits = c(0,75), breaks = seq(0,100,10)) + # starta alltid y på 0
-  scale_x_discrete(guide = guide_axis(n.dodge = 1),
-                   labels = ~ str_wrap(as.character(.x), 18)) + 
+  scale_y_continuous(limits = c(0, 75), breaks = seq(0, 100, 10)) + # starta alltid y på 0
+  scale_x_discrete(
+    guide = guide_axis(n.dodge = 1),
+    labels = ~ str_wrap(as.character(.x), 18)
+  ) +
   geom_col() +
-  geom_text(aes(label = paste0("n = ",n)), color = "darkgrey",
-            size = 4,
-            position = position_dodge(width = 0.9),
-            vjust = -0.4) +
-  scale_fill_viridis_d(direction = -1) + 
+  geom_text(aes(label = paste0("n = ", n)),
+    color = "darkgrey",
+    size = 4,
+    position = position_dodge(width = 0.9),
+    vjust = -0.4
+  ) +
+  scale_fill_viridis_d(direction = -1) +
+  theme_minimal() +
   theme_prevent() +
-  theme(legend.position = "none"
-        ) +
-  labs(title = str_wrap("Tycker du att frågorna täcker in det som är viktigt för att beskriva de grundläggande aspekterna av säkerhetskulturen på en arbetsplats?",59),
-       subtitle = paste0("Antal svar totalt: ",total_n,
-                         ". Andel positiva: ",q5a_long[1,4] + q5a_long[2,4],"%."),
-       caption = str_wrap("Staplarnas höjd anger andel (%) av respondenterna som svarat i respektive svarskategori. Siffran ovanför staplarna anger antalet respondenter som svarat i den kategorin.", 100))
+  theme(legend.position = "none") +
+  labs(
+    title = str_wrap("Tycker du att frågorna täcker in det som är viktigt för att beskriva de grundläggande aspekterna av säkerhetskulturen på en arbetsplats?", 59),
+    subtitle = paste0(
+      "Antal svar totalt: ", total_n,
+      ". Andel positiva: ", q5a_long[1, 4] + q5a_long[2, 4], "%."
+    ),
+    caption = str_wrap("Staplarnas höjd anger andel (%) av respondenterna som svarat i respektive svarskategori. Siffran ovanför staplarna anger antalet respondenter som svarat i den kategorin.", 100)
+  )
 ```
 
 ### Fritextkommentarer
@@ -2183,36 +2190,46 @@ total_n_q6 <- df %>%
   na.omit() %>%
   nrow()
 
-q6_long <- df %>% 
-    select(q6) %>% 
-    pivot_longer(everything()) %>%
-    na.omit() %>% 
-    count(name, value) %>% # räkna hur många individer i varje svarskategori
-    mutate(Procent = (100 * n / sum(n))) %>% # räkna fram procent för varje svarskategori
-    mutate(across(where(is.numeric), ~ round(.x, 2))) %>%
-    rename(
-      Svarskategori = value, # byt namn på variabler inför skapande av figur.
-      Fråga = name
-    ) %>%
-    add_column(item = "Har du det senaste året varit med om en eller flera arbetsplatsolyckor som resulterat i mer än en dags frånvaro från arbetet?")
+q6_long <- df %>%
+  mutate(q6 = factor(q6,
+    levels = c("Nej", "Ja, en gång", "Ja, två gånger", "Ja, tre gånger", "Ja, fyra gånger eller fler"),
+    ordered = TRUE
+  )) %>%
+  select(q6) %>%
+  pivot_longer(everything()) %>%
+  na.omit() %>%
+  count(name, value) %>% # räkna hur många individer i varje svarskategori
+  mutate(Procent = (100 * n / sum(n))) %>% # räkna fram procent för varje svarskategori
+  mutate(across(where(is.numeric), ~ round(.x, 2))) %>%
+  rename(
+    Svarskategori = value, # byt namn på variabler inför skapande av figur.
+    Fråga = name
+  ) %>%
+  add_column(item = "Har du det senaste året varit med om en eller flera arbetsplatsolyckor som resulterat i mer än en dags frånvaro från arbetet?")
 
-q6_long %>% 
-    ggplot(aes(x = Svarskategori, y = Procent, fill = Svarskategori)) +
-    scale_y_continuous(limits = c(0,75), breaks = seq(0,100,10)) + # starta alltid y på 0
-    #scale_x_discrete(labels = c(0:length(svarskategorier))) + # byt etikett på x axeln så det blir mindre text i figuren
-    geom_col() +
-    geom_text(aes(label = paste0("n = ",n)), color = "darkgrey",
-              size = 4,
-              position = position_dodge(width = 0.9),
-              vjust = -0.5) +
-    scale_fill_viridis_d(direction = -1) +
-    theme(legend.position = "none",
-          panel.grid.major.x = element_blank(),
-          panel.grid.minor.x = element_blank()) +
+q6_long %>%
+  ggplot(aes(x = Svarskategori, y = Procent, fill = Svarskategori)) +
+  scale_y_continuous(limits = c(0, 75), breaks = seq(0, 100, 10)) + # starta alltid y på 0
+  geom_col() +
+  geom_text(aes(label = paste0("n = ", n)),
+    color = "darkgrey",
+    size = 4,
+    position = position_dodge(width = 0.9),
+    vjust = -0.5
+  ) +
+  scale_fill_viridis_d(direction = -1) +
+  theme_minimal() +
   theme_prevent() +
-    labs(title = str_wrap("Har du det senaste året varit med om en eller flera arbetsplatsolyckor som resulterat i mer än en dags frånvaro från arbetet?",70),
-         subtitle = paste0("Antal svar totalt: ",total_n_q6),
-         caption = str_wrap("Staplarnas höjd anger andel (%) av respondenterna som svarat i respektive svarskategori. Siffran ovanför staplarna anger antalet respondenter (n) som svarat i den kategorin.", 100))
+  theme(
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  ) +
+  labs(
+    title = str_wrap("Har du det senaste året varit med om en eller flera arbetsplatsolyckor som resulterat i mer än en dags frånvaro från arbetet?", 70),
+    subtitle = paste0("Antal svar totalt: ", total_n_q6),
+    caption = str_wrap("Staplarnas höjd anger andel (%) av respondenterna som svarat i respektive svarskategori. Siffran ovanför staplarna anger antalet respondenter (n) som svarat i den kategorin.", 100)
+  )
 ```
 
 ### Strukturell ekvationsmodell
