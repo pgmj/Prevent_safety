@@ -8,9 +8,9 @@ author:
   affiliation: RISE Research Institutes of Sweden
   affiliation-url: https://www.ri.se/shic
   orcid: 0000-0003-1669-592X
-  doi: '10.5281/zenodo.11108748'
 date: 2024-05-03
 date-format: iso
+doi: '10.5281/zenodo.11108748'
 format: 
   html:
     toc: true
